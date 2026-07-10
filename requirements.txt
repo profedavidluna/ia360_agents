@@ -1,0 +1,10 @@
+# Dependencias para el Agente RAG con Pinecone
+
+# Embeddings
+sentence-transformers>=2.2.0
+
+# Procesamiento de PDFs
+PyPDF2>=3.0.0
+
+# (Opcional) Para mejor rendimiento
+numpy>=1.20.0
