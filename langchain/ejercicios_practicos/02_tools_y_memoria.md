@@ -1,31 +1,44 @@
-# 02 - Tools + Memoria Conversacional
+# 02 - Tools + Memoria Conversacional (Versión Completa)
 
 ## Objetivo
 
-Enriquecer el agente con herramientas y memoria de sesión.
+Extender TravelOps IA con dos tools (clima y políticas), memoria corta por conversación, control de timeout y degradación robusta.
 
-## Qué agregar al proyecto
+## Implementación realizada
 
-- tool de clima
-- tool de políticas de viaje
-- memoria corta por conversación
+### Archivos
 
-## Tareas
+- `/home/runner/work/ia360_agents/ia360_agents/travelops/exercise02_tools_memory_agent.py`
+- `/home/runner/work/ia360_agents/ia360_agents/test_exercise02_tools_memory_agent.py`
 
-1. Conectar 2 tools con timeout y manejo de errores
-2. Guardar contexto de la conversación
-3. Evitar repetir preguntas ya respondidas
-4. Citar qué tool aportó cada dato clave
+### Componentes incorporados
 
-## Escenarios de prueba
+1. **Tool de clima** (`weather_tool`)
+   - invocado con timeout configurable
+   - cacheado por destino en memoria de conversación
+2. **Tool de políticas** (`policy_tool`)
+   - invocado con timeout configurable
+   - cacheado por destino en memoria de conversación
+3. **Memoria corta**
+   - `last_destination`
+   - `recent_queries` (últimas 5)
+   - `response_cache` para consultas repetidas
+   - caches de weather/policy por destino
+4. **Manejo de errores y degradación**
+   - timeout/falla de tool → riesgo explícito + modo `partial`
+   - falla de LLM → fallback determinístico con datos de tools disponibles
+5. **Trazabilidad de evidencia**
+   - cada dato clave incluye fuente (`weather_tool`, `policy_tool`, `cached_*`)
 
-- primera consulta de destino
-- pregunta de seguimiento ("¿y si cambio a París?")
-- tool caída (debe degradar con aviso)
+## Escenarios de prueba cubiertos
 
-## Criterios de éxito
+- primera consulta de destino (invoca tools y evidencia de fuentes)
+- pregunta de seguimiento (`¿y si cambio a París?`) manteniendo contexto conversacional
+- caída de tool (respuesta degradada con aviso y continuidad)
 
-- usa tools de forma controlada
-- mantiene contexto entre turnos
-- responde aun cuando una tool falle
+## Resultado esperado
 
+- uso controlado de tools con timeout y fallback
+- continuidad de contexto entre turnos
+- no repetición de consultas idénticas (reutilización de memoria)
+- evidencia explícita de qué tool aportó cada dato
