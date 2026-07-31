@@ -11,4 +11,4 @@ Esta carpeta contiene el material nuevo para la ruta de aprendizaje de agentes c
 ## Contenido
 
 - `GUIA_COMPLETA_AGENTES_LANGCHAIN_LANGGRAPH_LANGSMITH_A2A_MCP.md`
-
+- `ejercicios_practicos/README.md`
