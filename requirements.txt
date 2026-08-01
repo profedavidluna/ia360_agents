@@ -8,3 +8,10 @@ PyPDF2>=3.0.0
 
 # (Opcional) Para mejor rendimiento
 numpy>=1.20.0
+
+# LangChain (implementaciones en langchain_impl/)
+langchain>=0.3.0
+langchain-core>=0.3.0
+langchain-text-splitters>=0.3.0
+langchain-openai>=0.2.0
+langchain-anthropic>=0.3.0
