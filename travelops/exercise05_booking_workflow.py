@@ -228,7 +228,7 @@ def extract_trip_details(message: str) -> dict[str, Any]:
     text = " ".join(message.strip().split())
 
     route_match = re.search(
-        r"\bde\s+([A-Za-zÁÉÍÓÚáéíóúñÑ\s]+?)\s+a\s+([A-Za-zÁÉÍÓÚáéíóúñÑ\s]+?)(?=\s+(?:del|para|con|y|$))",
+        r"\bde\s+([A-Za-zÁÉÍÓÚáéíóúñÑ\s]+?)\s+a\s+([A-Za-zÁÉÍÓÚáéíóúñÑ\s]+?)(?=(?:\s+(?:del|para|con|y)\b|$))",
         text,
         flags=re.IGNORECASE,
     )
