@@ -9,9 +9,23 @@ from typing import Any
 from langchain_core.tools import StructuredTool
 
 try:
-    from .common import get_llm_config, invoke_with_history
+    from .common import get_langchain_model, get_llm_config, invoke_with_history, dict_history_to_messages
 except ImportError:
-    from common import get_llm_config, invoke_with_history
+    from common import get_langchain_model, get_llm_config, invoke_with_history, dict_history_to_messages
+
+# ---------------------------------------------------------------------------
+# Importaciones opcionales de langchain.agents
+# Se usan cuando el paquete langchain está instalado (langchain>=0.3).
+# Si no están disponibles el agente cae al ciclo manual original.
+# ---------------------------------------------------------------------------
+
+try:
+    from langchain.agents import AgentExecutor, create_tool_calling_agent
+    from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+
+    _LANGCHAIN_AGENTS_AVAILABLE = True
+except ImportError:  # pragma: no cover
+    _LANGCHAIN_AGENTS_AVAILABLE = False
 
 
 def search_flights(origin: str, destination: str, date: str) -> str:
@@ -65,7 +79,39 @@ TOOLS: dict[str, StructuredTool] = {
 }
 
 
+
 def build_system_prompt_with_tools() -> str:
+    return (
+        "Eres TravelOps Tools Agent con LangChain. "
+        "Responde en español y usa las herramientas disponibles cuando sea necesario. "
+        "Cuando tengas toda la información necesaria, responde directamente al usuario "
+        "de forma clara y útil."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Prompt para el AgentExecutor de LangChain
+# (requiere {input}, {chat_history} y {agent_scratchpad})
+# ---------------------------------------------------------------------------
+
+def build_agent_prompt():
+    """Construye el ChatPromptTemplate requerido por create_tool_calling_agent."""
+    return ChatPromptTemplate.from_messages(
+        [
+            ("system", build_system_prompt_with_tools()),
+            MessagesPlaceholder("chat_history", optional=True),
+            ("human", "{input}"),
+            MessagesPlaceholder("agent_scratchpad"),
+        ]
+    )
+
+
+# ---------------------------------------------------------------------------
+# Funciones auxiliares para el fallback (ciclo manual)
+# Se conservan para compatibilidad cuando langchain.agents no está disponible.
+# ---------------------------------------------------------------------------
+
+def build_system_prompt_manual_fallback() -> str:
     return (
         "Eres TravelOps Tools Agent con LangChain. "
         "Responde en español y usa herramientas cuando sea necesario. "
@@ -113,21 +159,75 @@ def execute_tool(tool_name: str, args: dict[str, Any]) -> str:
     return str(TOOLS[tool_name].invoke(args))
 
 
+# ---------------------------------------------------------------------------
+# Clase TravelAgentWithTools
+# ---------------------------------------------------------------------------
+
 @dataclass
 class TravelAgentWithTools:
+    """Agente de viajes con herramientas usando LangChain.
+
+    Cuando el paquete ``langchain`` está instalado (>=0.3) el agente usa
+    ``create_tool_calling_agent`` + ``AgentExecutor``, que es la forma
+    oficial de crear agentes con uso de herramientas en LangChain.
+
+    Cuando ``langchain.agents`` no está disponible se usa un ciclo manual
+    de parseo JSON como fallback, conservando la misma interfaz pública.
+
+    Attributes:
+        system_prompt:    Prompt del sistema.
+        history:          Historial de conversación (role/content).
+        max_tool_rounds:  Máximo de iteraciones de herramientas.
+    """
+
     system_prompt: str = field(default_factory=build_system_prompt_with_tools)
     history: list[dict[str, str]] = field(default_factory=list)
     max_tool_rounds: int = 3
+    _executor: Any = field(default=None, init=False, repr=False)
 
-    def chat(self, user_message: str) -> str:
-        user_message = user_message.strip()
-        if not user_message:
-            raise ValueError("El mensaje del usuario no puede estar vacío.")
+    def _get_executor(self) -> Any:
+        """Construye o retorna el AgentExecutor cacheado."""
+        if self._executor is not None:
+            return self._executor
 
+        prompt = build_agent_prompt()
+        llm = get_langchain_model(temperature=0.2)
+        tools = list(TOOLS.values())
+        agent = create_tool_calling_agent(llm, tools, prompt)
+        self._executor = AgentExecutor(
+            agent=agent,
+            tools=tools,
+            verbose=False,
+            max_iterations=self.max_tool_rounds,
+        )
+        return self._executor
+
+    def _chat_with_agent_executor(self, user_message: str) -> str:
+        """Ciclo de agente usando create_tool_calling_agent + AgentExecutor."""
+        executor = self._get_executor()
+
+        # Historial previo convertido a mensajes LangChain
+        chat_history = dict_history_to_messages(self.history)
+
+        result = executor.invoke(
+            {"input": user_message, "chat_history": chat_history}
+        )
+
+        response = str(result.get("output", "")).strip()
+        if not response:
+            raise RuntimeError("AgentExecutor devolvió respuesta vacía.")
+
+        self.history.append({"role": "user", "content": user_message})
+        self.history.append({"role": "assistant", "content": response})
+        return response
+
+    def _chat_with_manual_loop(self, user_message: str) -> str:
+        """Ciclo manual de herramientas (fallback cuando langchain.agents no está disponible)."""
+        fallback_prompt = build_system_prompt_manual_fallback()
         self.history.append({"role": "user", "content": user_message})
 
         for _ in range(self.max_tool_rounds):
-            llm_text = invoke_with_history(self.system_prompt, self.history, temperature=0.2)
+            llm_text = invoke_with_history(fallback_prompt, self.history, temperature=0.2)
             tool_call = parse_tool_call(llm_text)
 
             if not tool_call:
@@ -155,20 +255,49 @@ class TravelAgentWithTools:
             "Responde con la mejor recomendación posible usando los resultados disponibles."
         )
         self.history.append({"role": "user", "content": guardrail_message})
-        final_response = invoke_with_history(self.system_prompt, self.history, temperature=0.2)
+        final_response = invoke_with_history(fallback_prompt, self.history, temperature=0.2)
         self.history.append({"role": "assistant", "content": final_response})
         return final_response
 
+    def chat(self, user_message: str) -> str:
+        """Procesa un mensaje usando el agente LangChain o el fallback manual.
+
+        Si ``langchain.agents`` está disponible, invoca al agente con
+        ``create_tool_calling_agent`` + ``AgentExecutor``; de lo contrario
+        usa el ciclo manual de parseo JSON.
+
+        Args:
+            user_message: Texto del usuario.
+
+        Returns:
+            Respuesta del agente de viajes.
+
+        Raises:
+            ValueError: Si ``user_message`` es una cadena vacía.
+            RuntimeError: Si el LLM no está disponible.
+        """
+        user_message = user_message.strip()
+        if not user_message:
+            raise ValueError("El mensaje del usuario no puede estar vacío.")
+
+        if _LANGCHAIN_AGENTS_AVAILABLE:
+            return self._chat_with_agent_executor(user_message)
+
+        return self._chat_with_manual_loop(user_message)
+
     def reset(self) -> None:
         self.history = []
+        self._executor = None
 
     def run_interactive(self) -> None:
         config = get_llm_config()
+        mode = "AgentExecutor (create_tool_calling_agent)" if _LANGCHAIN_AGENTS_AVAILABLE else "ciclo manual (fallback)"
         print("=" * 60)
         print("TRAVELOPS LANGCHAIN — Ejercicio 02")
         print("=" * 60)
         print(f"Modelo : {config['model']}")
         print(f"Servidor: {config['base_url']}")
+        print(f"Modo   : {mode}")
         print("Escribe 'salir' para terminar.\n")
 
         while True:

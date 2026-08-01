@@ -191,6 +191,23 @@ def _http_fallback(messages: list[BaseMessage], temperature: float) -> str:
     return answer
 
 
+def get_langchain_model(temperature: float = 0.3):
+    """Retorna el modelo de chat LangChain listo para usar.
+
+    Esta función pública expone el modelo para ejercicios que necesitan
+    pasarlo directamente a ``create_tool_calling_agent``, ``create_react_agent``
+    u otros constructores de agentes LangChain.
+
+    Returns:
+        Instancia de ``ChatAnthropic`` o ``ChatOpenAI`` configurada con la
+        URL, clave y modelo leídos desde variables de entorno.
+
+    Raises:
+        RuntimeError: Si no hay ningún backend de chat instalado.
+    """
+    return _build_langchain_model(temperature=temperature)
+
+
 def invoke_messages(messages: list[BaseMessage], temperature: float = 0.3) -> str:
     """Invoca al LLM con mensajes LangChain y retorna texto."""
     try:
